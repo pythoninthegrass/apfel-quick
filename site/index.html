@@ -428,6 +428,33 @@
     .ck { background: #16a34a; color: #fff; }
     .cx { background: #eaeaea; color: #aaa; }
 
+    /* ── ACCUSATION AUDIT (Voss Q&A) ── */
+    .aa-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .aa-row {
+      background: #fff;
+      border: 1px solid var(--bdl);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .aa-q {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .aa-a {
+      font-size: 13px;
+      color: var(--text2);
+    }
+    .aa-a strong { color: var(--brand-dark); font-weight: 700; }
+    @media (min-width: 600px) {
+      .aa-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+    }
+
     /* ── INSTALL ── */
     .install-card {
       background: #fff;
@@ -792,6 +819,42 @@
           </tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</section>
+
+<!-- Accusation audit — every objection, answered, right before the button -->
+<section class="sec" id="qa">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="lbl">Before you download</div>
+      <h2>Every question, answered.</h2>
+    </div>
+    <div class="aa-grid">
+      <div class="aa-row">
+        <div class="aa-q">Will it replace ChatGPT?</div>
+        <div class="aa-a">No. For deep research, cloud AI is still better. Most days you don't need it.</div>
+      </div>
+      <div class="aa-row">
+        <div class="aa-q">Is the on-device model good enough?</div>
+        <div class="aa-a">For what you actually ask every day? <strong>Yes.</strong> The screenshots above are real answers.</div>
+      </div>
+      <div class="aa-row">
+        <div class="aa-q">Does it phone home?</div>
+        <div class="aa-a"><strong>No.</strong> Zero network calls. Literally works with Wi-Fi off.</div>
+      </div>
+      <div class="aa-row">
+        <div class="aa-q">Does it cost anything?</div>
+        <div class="aa-a"><strong>No.</strong> Free, forever. MIT license.</div>
+      </div>
+      <div class="aa-row">
+        <div class="aa-q">Do I need an account or API key?</div>
+        <div class="aa-a"><strong>No.</strong> Just a Mac.</div>
+      </div>
+      <div class="aa-row">
+        <div class="aa-q">What if I hate it?</div>
+        <div class="aa-a">Drag the app to the trash. Zero cleanup.</div>
+      </div>
     </div>
   </div>
 </section>
