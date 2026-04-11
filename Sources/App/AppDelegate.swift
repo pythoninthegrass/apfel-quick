@@ -1,6 +1,21 @@
 import AppKit
 import SwiftUI
 
+// Borderless panel that can still become key — needed so the TextField
+// receives keyboard input. Without the override, a .borderless style mask
+// prevents the panel from ever becoming the key window.
+final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+}
+
+extension Bundle {
+    var shortVersion: String {
+        (infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
@@ -22,8 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let vm = QuickViewModel()
         self.viewModel = vm
 
-        Task {
-            await bootstrap(viewModel: vm)
+        Task { @MainActor [weak self] in
+            await self?.bootstrap(viewModel: vm)
         }
     }
 
@@ -39,21 +54,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func bootstrap(viewModel: QuickViewModel) async {
         // a. Load settings from UserDefaults
         let settings = QuickSettings.load()
-
-        // b. Update viewModel.settings
         viewModel.settings = settings
 
-        // c. Create NSPanel with OverlayView hosted in NSHostingController
+        // b. Create NSPanel with OverlayView hosted in NSHostingController
         let panel = makePanel(viewModel: viewModel)
         self.panel = panel
 
-        // d. Register global hotkey (Ctrl+Space)
+        // c. Register global hotkey (Ctrl+Space)
         registerGlobalHotkey()
 
-        // e. Register local mouse monitor for click-outside dismissal
+        // d. Register local mouse monitor for click-outside dismissal
         registerMouseDismissMonitor()
 
-        // f. Setup status bar item if settings.showMenuBar
+        // e. Setup status bar item if settings.showMenuBar
         if settings.showMenuBar {
             setupStatusItem()
         }
@@ -67,28 +80,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.hideOverlay() }
         }
 
-        // g. Start ServerManager → on success, inject ApfelQuickService into viewModel
-        if let port = await serverManager.start() {
-            viewModel.service = ApfelQuickService(port: port)
-        }
+        // Panel auto-resize: observe viewModel state and grow/shrink the panel
+        // to fit the current overlay content.
+        startPanelSizeObserver(viewModel: viewModel)
 
-        // h. Show WelcomeOverlayView if !settings.hasSeenWelcome
+        // f. Show WelcomeOverlayView FIRST — before we block on server start
+        //    so the user sees UI immediately on first run.
         if !settings.hasSeenWelcome {
             showWelcomePanel()
+        } else if !settings.launchAtLoginPromptShown {
+            // Welcome already seen on a prior launch but login prompt never shown
+            // (upgrade path) — show it now.
+            promptForLaunchAtLogin(viewModel: viewModel)
         }
 
-        // i. Check for update silently if settings.checkForUpdatesOnLaunch
+        // g. Start ServerManager in parallel — do NOT await here so the UI
+        //    stays responsive. When the server is ready we inject the service.
+        Task { [weak self, weak viewModel] in
+            guard let self, let viewModel else { return }
+            if let port = await self.serverManager.start() {
+                await MainActor.run {
+                    viewModel.service = ApfelQuickService(port: port)
+                }
+            }
+        }
+
+        // h. Check for update silently if enabled
         if settings.checkForUpdatesOnLaunch {
-            await viewModel.checkForUpdateSilently()
+            Task { await viewModel.checkForUpdateSilently() }
         }
     }
 
     // MARK: - Panel construction
 
     private func makePanel(viewModel: QuickViewModel) -> NSPanel {
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 56),
-            styleMask: [.borderless, .nonactivatingPanel],
+        let panel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 60),
+            styleMask: [.borderless, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -97,18 +125,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false   // keep visible across app focus changes
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        panel.worksWhenModal = true
 
-        // Center on active screen, upper third
-        if let screen = NSScreen.main {
-            let x = screen.frame.midX - 310
-            let y = screen.frame.maxY - screen.frame.height * 0.35
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
-        }
-
-        let hostingController = NSHostingController(rootView: OverlayView(viewModel: viewModel))
-        hostingController.view.frame = NSRect(x: 0, y: 0, width: 620, height: 56)
+        let hostingController = NSHostingController(
+            rootView: OverlayView(viewModel: viewModel)
+                .frame(width: 620)
+        )
+        hostingController.view.frame = NSRect(x: 0, y: 0, width: 620, height: 60)
         panel.contentViewController = hostingController
+
+        // Center on active screen, upper third, after sizing
+        if let screen = NSScreen.main {
+            let width: CGFloat = 620
+            let x = screen.frame.midX - width / 2
+            let y = screen.frame.maxY - screen.frame.height * 0.35
+            panel.setFrame(NSRect(x: x, y: y, width: width, height: 60), display: false)
+        }
 
         return panel
     }
@@ -117,8 +152,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showOverlay() {
         guard let panel else { return }
+        // Re-center on the screen that currently has the mouse cursor
+        if let screen = NSScreen.main {
+            let width: CGFloat = 620
+            let x = screen.frame.midX - width / 2
+            let y = screen.frame.maxY - screen.frame.height * 0.35
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        }
         NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        panel.orderFrontRegardless()
+        panel.makeKey()
     }
 
     func hideOverlay() {
@@ -195,29 +238,124 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildContextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(
-            title: "Show apfel-quick",
+
+        let show = NSMenuItem(
+            title: "Open apfel-quick",
             action: #selector(showOverlayFromMenu),
+            keyEquivalent: " "
+        )
+        show.keyEquivalentModifierMask = .control
+        show.target = self
+        menu.addItem(show)
+
+        let settings = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openSettingsFromMenu),
+            keyEquivalent: ","
+        )
+        settings.target = self
+        menu.addItem(settings)
+
+        let welcome = NSMenuItem(
+            title: "Show Welcome Again",
+            action: #selector(showWelcomeFromMenu),
             keyEquivalent: ""
-        ))
+        )
+        welcome.target = self
+        menu.addItem(welcome)
+
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(
+
+        let version = NSMenuItem(
+            title: "apfel-quick v\(Bundle.main.shortVersion)",
+            action: nil,
+            keyEquivalent: ""
+        )
+        version.isEnabled = false
+        menu.addItem(version)
+
+        let website = NSMenuItem(
+            title: "Visit apfel-quick.franzai.com",
+            action: #selector(openWebsite),
+            keyEquivalent: ""
+        )
+        website.target = self
+        menu.addItem(website)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(
             title: "Quit apfel-quick",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
-        ))
+        )
+        menu.addItem(quit)
+
         return menu
+    }
+
+    // MARK: - Panel auto-resize observer
+
+    private func startPanelSizeObserver(viewModel: QuickViewModel) {
+        // Simple polling loop — cheap and avoids @Sendable closure issues.
+        Task { @MainActor [weak self, weak viewModel] in
+            while let _ = self, let _ = viewModel {
+                self?.resizePanelForContent()
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+        }
+    }
+
+    private func resizePanelForContent() {
+        guard let panel, let vm = viewModel else { return }
+        let inputHeight: CGFloat = 60
+        var total = inputHeight
+        if !vm.output.isEmpty || vm.isStreaming {
+            // Measure approximately: 20pt per line, estimate line count from characters
+            let maxBodyHeight: CGFloat = 380
+            let approxLines = max(1, vm.output.count / 60 + 1)
+            let bodyHeight = min(maxBodyHeight, CGFloat(approxLines) * 22 + 40)
+            total += bodyHeight
+        }
+        if vm.errorMessage != nil {
+            total += 40
+        }
+        var frame = panel.frame
+        if abs(frame.height - total) > 1 {
+            let delta = total - frame.height
+            frame.size.height = total
+            frame.origin.y -= delta  // grow down from the top
+            panel.setFrame(frame, display: true, animate: false)
+        }
     }
 
     @objc private func showOverlayFromMenu() {
         showOverlay()
     }
 
+    @objc private func openSettingsFromMenu() {
+        showOverlay()
+        NotificationCenter.default.post(name: .openSettings, object: nil)
+    }
+
+    @objc private func showWelcomeFromMenu() {
+        welcomePanel?.orderOut(nil)
+        welcomePanel = nil
+        showWelcomePanel()
+    }
+
+    @objc private func openWebsite() {
+        if let url = URL(string: "https://apfel-quick.franzai.com") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     // MARK: - Welcome panel
 
-    private func showWelcomePanel() {
+    func showWelcomePanel() {
+        guard let vm = viewModel else { return }
         let welcomePanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 540),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -228,13 +366,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         welcomePanel.center()
 
         let hostingController = NSHostingController(
-            rootView: WelcomeOverlayView(onContinue: { [weak self, weak welcomePanel] in
+            rootView: WelcomeOverlayView(viewModel: vm, onContinue: { [weak self, weak welcomePanel] in
                 Task { @MainActor [weak self, weak welcomePanel] in
                     guard let self else { return }
                     self.viewModel?.settings.hasSeenWelcome = true
                     self.viewModel?.settings.save()
                     welcomePanel?.orderOut(nil)
                     self.welcomePanel = nil
+                    // Follow up with the launch-at-login dialog, then show overlay
+                    if let vm = self.viewModel, !vm.settings.launchAtLoginPromptShown {
+                        self.promptForLaunchAtLogin(viewModel: vm)
+                    }
+                    self.showOverlay()
                 }
             })
         )
@@ -242,6 +385,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.welcomePanel = welcomePanel
         welcomePanel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Mirror of apfel-clip's launch-at-login alert — asked once, persisted.
+    @MainActor
+    private func promptForLaunchAtLogin(viewModel: QuickViewModel) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Start apfel-quick at login?"
+        alert.informativeText = "Keep apfel-quick ready in your menu bar every time you sign in. You can change this later in Settings."
+        alert.addButton(withTitle: "Enable at Login")
+        alert.addButton(withTitle: "Not Now")
+        let enable = alert.runModal() == .alertFirstButtonReturn
+        viewModel.settings.launchAtLogin = enable
+        viewModel.settings.launchAtLoginPromptShown = true
+        viewModel.settings.save()
+        viewModel.applyLaunchAtLogin()
     }
 }
 

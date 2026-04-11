@@ -48,7 +48,7 @@ struct ApfelQuickServiceTests {
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
     }
 
-    // MARK: - 4. Body JSON has messages array with user role and prompt content
+    // MARK: - 4. Body JSON contains the user prompt somewhere in messages
 
     @Test func testBuildRequestBodyContainsPrompt() throws {
         let service = makeService()
@@ -84,19 +84,24 @@ struct ApfelQuickServiceTests {
         #expect(json?["model"] != nil)
     }
 
-    // MARK: - 7. messages[0].role == "user"
+    // MARK: - 7. A system message precedes the user message
 
-    @Test func testBuildRequestBodyUserRole() throws {
+    @Test func testBuildRequestBodyHasSystemMessage() throws {
         let service = makeService()
-        let request = try service.buildRequest(prompt: "hello")
+        let request = try service.buildRequest(prompt: "hi")
         let body = try #require(request.httpBody)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let messages = try #require(json?["messages"] as? [[String: Any]])
-        let firstMessage = try #require(messages.first)
-        #expect((firstMessage["role"] as? String) == "user")
+        // First message should be the system prompt
+        let first = try #require(messages.first)
+        #expect((first["role"] as? String) == "system")
+        let systemContent = (first["content"] as? String) ?? ""
+        // Must instruct: direct answers, no preamble/postamble, no apology
+        #expect(!systemContent.isEmpty)
+        #expect(systemContent.lowercased().contains("direct") || systemContent.lowercased().contains("concise"))
     }
 
-    // MARK: - 8. messages[0].content == the prompt string passed in
+    // MARK: - 8. messages contains the user prompt as the second entry
 
     @Test func testBuildRequestBodyUserContent() throws {
         let service = makeService()
@@ -105,8 +110,10 @@ struct ApfelQuickServiceTests {
         let body = try #require(request.httpBody)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let messages = try #require(json?["messages"] as? [[String: Any]])
-        let firstMessage = try #require(messages.first)
-        #expect((firstMessage["content"] as? String) == prompt)
+        // User message is the last one
+        let user = try #require(messages.last)
+        #expect((user["role"] as? String) == "user")
+        #expect((user["content"] as? String) == prompt)
     }
 
     // MARK: - 9. Empty string prompt builds a valid request (no throw)

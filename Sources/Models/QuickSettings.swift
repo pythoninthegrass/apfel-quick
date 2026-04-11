@@ -16,6 +16,7 @@ struct QuickSettings: Codable, Sendable {
 
     // First run
     var hasSeenWelcome: Bool = false
+    var launchAtLoginPromptShown: Bool = false
 
     // Persistence key
     static let defaultsKey = "QuickSettings"

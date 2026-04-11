@@ -38,6 +38,15 @@ struct SettingsView: View {
             Toggle("Check for updates on launch", isOn: $viewModel.settings.checkForUpdatesOnLaunch)
                 .onChange(of: viewModel.settings.checkForUpdatesOnLaunch) { _, _ in viewModel.settings.save() }
 
+            // Show welcome screen on next launch
+            Toggle("Show welcome screen on next launch", isOn: Binding(
+                get: { !viewModel.settings.hasSeenWelcome },
+                set: { newValue in
+                    viewModel.settings.hasSeenWelcome = !newValue
+                    viewModel.settings.save()
+                }
+            ))
+
             Divider()
 
             // Update status
@@ -66,8 +75,8 @@ struct SettingsView: View {
                 Spacer()
             }
         }
-        .padding(24)
-        .frame(width: 380, height: 340)
+        .padding(28)
+        .frame(width: 480, height: 520)
         .background(.white)
     }
 

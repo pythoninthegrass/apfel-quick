@@ -4,6 +4,17 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
     let baseURL: URL
     let modelName: String
 
+    /// System prompt that keeps answers tight: no preamble, no postamble,
+    /// no "as an AI" disclaimers, no apologies. Just the answer the user wants.
+    static let systemPrompt: String = """
+    You are a fast, direct assistant in a Spotlight-style overlay. \
+    Answer only what is asked. No preamble, no postamble, no apologies, \
+    no "as an AI" disclaimers, no safety moralizing, no invitations to ask \
+    follow-ups. If the user asks a factual question, state the fact. If \
+    they ask for code, give code. If they ask for a translation, give only \
+    the translation. Be concise and direct.
+    """
+
     init(baseURL: URL, modelName: String = "apple-foundationmodel") {
         self.baseURL = baseURL
         self.modelName = modelName
@@ -24,7 +35,8 @@ struct ApfelQuickService: QuickService, @unchecked Sendable {
             "model": modelName,
             "stream": true,
             "messages": [
-                ["role": "user", "content": prompt]
+                ["role": "system", "content": Self.systemPrompt],
+                ["role": "user", "content": prompt],
             ]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

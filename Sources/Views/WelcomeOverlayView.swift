@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct WelcomeOverlayView: View {
+    @Bindable var viewModel: QuickViewModel
     var onContinue: () -> Void
 
     var body: some View {
@@ -8,9 +9,13 @@ struct WelcomeOverlayView: View {
             VStack(spacing: 16) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(red: 0.12, green: 0.12, blue: 0.12))
-                    Image(systemName: "bubble.left.and.text.bubble.right")
-                        .font(.system(size: 30, weight: .semibold))
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.38, green: 0.13, blue: 0.66),
+                                     Color(red: 0.24, green: 0.07, blue: 0.44)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 32, weight: .semibold))
                         .foregroundStyle(.white)
                 }
                 .frame(width: 64, height: 64)
@@ -30,19 +35,34 @@ struct WelcomeOverlayView: View {
                     featureBullet("bolt", "Instant — no sign-up, no account")
                 }
                 .padding(.top, 4)
+
+                Divider().padding(.top, 6)
+
+                Toggle(isOn: $viewModel.settings.checkForUpdatesOnLaunch) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check for updates on launch")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("We'll quietly check GitHub for new releases.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
             }
             .padding(32)
 
             Divider()
 
             Button("Get Started") {
+                viewModel.settings.save()
                 onContinue()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
             .padding(20)
         }
-        .frame(width: 440)
+        .frame(width: 460)
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
@@ -51,7 +71,7 @@ struct WelcomeOverlayView: View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color(red: 0.55, green: 0.36, blue: 0.96))
                 .frame(width: 20)
             Text(text)
                 .font(.system(size: 13))

@@ -12,10 +12,20 @@ import Observation
     var errorMessage: String? = nil
     var settings: QuickSettings
     var updateState: UpdateState = .idle
+    /// True briefly after auto-copy fires, so the UI can flash a "Copied!" indicator.
+    var justCopied: Bool = false
 
     // MARK: - Dependencies
 
     var service: (any QuickService)?
+
+    // How long submit() waits for `service` to be injected before giving up.
+    // Exposed so tests can lower this to keep them fast.
+    @ObservationIgnored var serviceWaitTimeout: Duration = .seconds(5)
+
+    // How long the "just copied" flag stays true after auto-copy.
+    @ObservationIgnored var justCopiedTimeout: Duration = .seconds(2)
+    @ObservationIgnored private var justCopiedTask: Task<Void, Never>?
 
     // MARK: - Private
 
@@ -47,6 +57,7 @@ import Observation
                 output = MathCalculator.format(result)
                 if settings.autoCopy {
                     copyOutput()
+                    markJustCopied()
                 }
             } catch {
                 errorMessage = "Math error: \(error)"
@@ -54,15 +65,16 @@ import Observation
             return
         }
 
-        guard let service else {
-            errorMessage = "Not connected to any service."
-            return
-        }
-
-        // Clear state before starting
+        // Wait briefly for service to be injected if bootstrap is still running.
         errorMessage = nil
         output = ""
         isStreaming = true
+        let waitingService = await waitForService(timeout: serviceWaitTimeout)
+        guard let service = waitingService else {
+            isStreaming = false
+            errorMessage = "Still starting on-device AI — please try again in a moment."
+            return
+        }
 
         let stream = service.send(prompt: input)
 
@@ -78,6 +90,7 @@ import Observation
                 isStreaming = false
                 if settings.autoCopy && !output.isEmpty {
                     copyOutput()
+                    markJustCopied()
                 }
             } catch is CancellationError {
                 // Cancelled — do not set errorMessage
@@ -90,6 +103,19 @@ import Observation
         }
 
         await streamTask?.value
+    }
+
+    // MARK: - Wait for service injection (poll until non-nil or timeout)
+
+    private func waitForService(timeout: Duration) async -> (any QuickService)? {
+        if let service { return service }
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        let pollInterval: Duration = .milliseconds(50)
+        while ContinuousClock.now < deadline {
+            if let service { return service }
+            try? await Task.sleep(for: pollInterval)
+        }
+        return service
     }
 
     // MARK: - Cancel
@@ -107,6 +133,17 @@ import Observation
         guard !output.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(output, forType: .string)
+    }
+
+    // MARK: - Just-copied flash
+
+    func markJustCopied() {
+        justCopiedTask?.cancel()
+        justCopied = true
+        justCopiedTask = Task { @MainActor [weak self, timeout = justCopiedTimeout] in
+            try? await Task.sleep(for: timeout)
+            self?.justCopied = false
+        }
     }
 
     // MARK: - Clear

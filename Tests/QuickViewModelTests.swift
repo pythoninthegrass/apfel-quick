@@ -182,16 +182,17 @@ struct QuickViewModelTests {
         #expect(vm.isStreaming == false)
     }
 
-    // MARK: - 11. Nil service shows "Not connected" error
+    // MARK: - 11. Nil service shows a friendly starting message after timeout
 
     @Test func testServiceNilShowsErrorMessage() async throws {
         let vm = QuickViewModel(service: nil as (any QuickService)?)
+        vm.serviceWaitTimeout = .milliseconds(150)
         vm.input = "hello"
         await vm.submit()
 
         #expect(vm.errorMessage != nil)
         let msg = vm.errorMessage ?? ""
-        #expect(msg.lowercased().contains("connect") || msg.lowercased().contains("not connected"))
+        #expect(msg.lowercased().contains("start") || msg.lowercased().contains("wait"))
         #expect(vm.isStreaming == false)
     }
 
@@ -314,6 +315,80 @@ struct QuickViewModelTests {
         vm.input = "prompt"
         await vm.submit()
         #expect(vm.output == "real text")
+    }
+
+    // MARK: - 23z. Auto-copy sets a "just copied" flag briefly
+
+    @Test func testAutoCopySetsJustCopiedFlag() async throws {
+        let service = MockQuickService()
+        await service.setResponses([
+            StreamDelta(text: "result", finishReason: "stop"),
+        ])
+        let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = true
+        vm.input = "hello"
+        await vm.submit()
+        #expect(vm.justCopied == true)
+        #expect(vm.output == "result")
+    }
+
+    @Test func testAutoCopyDisabledDoesNotSetJustCopiedFlag() async throws {
+        let service = MockQuickService()
+        await service.setResponses([
+            StreamDelta(text: "result", finishReason: "stop"),
+        ])
+        let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
+        vm.input = "hello"
+        await vm.submit()
+        #expect(vm.justCopied == false)
+    }
+
+    @Test func testJustCopiedClearsAfterTimeout() async throws {
+        let vm = QuickViewModel(service: nil)
+        vm.justCopiedTimeout = .milliseconds(50)
+        vm.markJustCopied()
+        #expect(vm.justCopied == true)
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(vm.justCopied == false)
+    }
+
+    // MARK: - 23a. Service-not-ready behaviour (service injected late)
+
+    @Test func testSubmitWaitsForServiceToBecomeReady() async throws {
+        // Start with service = nil, inject it mid-submit, confirm submit still succeeds
+        let vm = QuickViewModel(service: nil)
+        vm.settings.autoCopy = false
+        vm.input = "what is the capital of france"
+
+        // Inject service after 100ms
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            let service = MockQuickService()
+            await service.setResponses([
+                StreamDelta(text: "Paris", finishReason: "stop"),
+            ])
+            await MainActor.run { vm.service = service }
+        }
+
+        await vm.submit()
+        #expect(vm.output == "Paris")
+        #expect(vm.errorMessage == nil)
+    }
+
+    @Test func testSubmitShowsStartingMessageWhenServiceNil() async throws {
+        // When service is nil, submit should surface a friendly "starting" message
+        // (not a hard "not connected" error), and if service never arrives,
+        // the error should reflect timeout, not configuration failure.
+        let vm = QuickViewModel(service: nil)
+        vm.settings.autoCopy = false
+        vm.input = "hi"
+        vm.serviceWaitTimeout = .milliseconds(200)  // fast timeout for tests
+        await vm.submit()
+        #expect(vm.errorMessage != nil)
+        // It should mention "starting" or "waiting", not "Not connected"
+        let msg = vm.errorMessage ?? ""
+        #expect(msg.lowercased().contains("start") || msg.lowercased().contains("wait") || msg.lowercased().contains("ready"))
     }
 
     // MARK: - 23. Math expressions are evaluated locally
