@@ -20,6 +20,7 @@ struct QuickViewModelTests {
             StreamDelta(text: "!", finishReason: .some("stop")),
         ])
         let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
         vm.input = "Say hello"
         await vm.submit()
         #expect(vm.output == "Hello world!")
@@ -33,6 +34,7 @@ struct QuickViewModelTests {
             StreamDelta(text: "ok", finishReason: .some("stop")),
         ])
         let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
         vm.input = "prompt"
         // Pre-seed an error
         vm.errorMessage = "previous error"
@@ -48,6 +50,7 @@ struct QuickViewModelTests {
             StreamDelta(text: "fresh", finishReason: .some("stop")),
         ])
         let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
         vm.input = "first"
         vm.output = "stale result from previous run"
         await vm.submit()
@@ -81,6 +84,7 @@ struct QuickViewModelTests {
             StreamDelta(text: "done", finishReason: .some("stop")),
         ])
         let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
         vm.input = "prompt"
         await vm.submit()
         #expect(vm.isStreaming == false)
@@ -289,6 +293,7 @@ struct QuickViewModelTests {
             StreamDelta(text: nil, finishReason: "stop"),
         ])
         let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
         vm.input = "prompt"
         await vm.submit()
         #expect(vm.isStreaming == false)
@@ -305,6 +310,7 @@ struct QuickViewModelTests {
             StreamDelta(text: nil, finishReason: "stop"),
         ])
         let vm = QuickViewModel(service: service)
+        vm.settings.autoCopy = false
         vm.input = "prompt"
         await vm.submit()
         #expect(vm.output == "real text")

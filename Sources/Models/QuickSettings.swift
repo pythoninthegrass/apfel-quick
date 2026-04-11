@@ -7,7 +7,7 @@ struct QuickSettings: Codable, Sendable {
     var hotkeyModifiers: UInt = 262144   // Control key (NSEvent.ModifierFlags.control.rawValue)
 
     // Behaviour
-    var autoCopy: Bool = false           // Auto-copy result to clipboard when streaming completes
+    var autoCopy: Bool = true            // Auto-copy result to clipboard when streaming completes
     var launchAtLogin: Bool = true       // Start at login
     var showMenuBar: Bool = true         // Show status bar icon
 
